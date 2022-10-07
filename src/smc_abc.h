@@ -12,11 +12,12 @@
 //
 // -----------------------------------------------------------------------------
 
-#ifndef DEMO_MULTIPLE_SIMULATIONS_H_
-#define DEMO_MULTIPLE_SIMULATIONS_H_
+#ifndef SMC_ABC_H_
+#define SMC_ABC_H_
 
 #include <vector>
 #include "biodynamo.h"
+#include "sim-param.h"
 
 namespace bdm {
 
@@ -30,17 +31,28 @@ struct Divide : Behavior {
 };
 
 inline int Simulate(int argc, const char** argv) {
-  auto set_param = [](Param* param) {
-    // Turn on export visualization
+  Param::RegisterParamGroup(new SimParam());
+
+  std::vector<real_t> diams = {30, 40, 50};
+  real_t testpar = 0.;
+  auto set_param = [&](Param* param) {
     param->export_visualization = true;
     param->visualize_agents["Cell"] = {};
+    param->remove_output_dir_contents = true;
+
+    auto* sparam = param->Get<SimParam>();
+    sparam->diam = testpar;
   };
 
-  // Create two simulations
+  // Create num simulations
   std::vector<Simulation*> simulations;
-  simulations.push_back(new Simulation(argc, argv, set_param));
-  simulations.push_back(new Simulation(argc, argv, set_param));
 
+  int num = 3;
+  for (size_t i = 0; i < num; i++) {
+    testpar = diams[i];
+    simulations.push_back(
+        new Simulation("test" + std::to_string(num), set_param));
+  }
   // Initialize the model for each simulation
   for (auto* sim : simulations) {
     // If we switch between simulations we must call the function Activate();
@@ -49,7 +61,11 @@ inline int Simulate(int argc, const char** argv) {
 
     // Create initial model
     auto* rm = sim->GetResourceManager();
-    Cell* cell = new Cell(30);
+
+    auto* param = sim->GetParam();
+    auto* sparam = param->Get<SimParam>();
+    Log::Warning("Cell diam ", sparam->diam);
+    Cell* cell = new Cell(sparam->diam);
     cell->AddBehavior(new Divide());
     rm->AddAgent(cell);
   }
@@ -72,4 +88,4 @@ inline int Simulate(int argc, const char** argv) {
 
 }  // namespace bdm
 
-#endif  // DEMO_MULTIPLE_SIMULATIONS_H_
+#endif  // SMC_ABC_H_

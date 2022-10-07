@@ -14,7 +14,7 @@
 
 cmake_minimum_required(VERSION 3.2.0)
 
-project(multiple_simulations)
+project(smc_abc)
 
 find_package(BioDynaMo REQUIRED)
 include("${BDM_USE_FILE}")
@@ -23,7 +23,7 @@ include_directories("src")
 file(GLOB_RECURSE HEADERS src/*.h)
 file(GLOB_RECURSE SOURCES src/*.cc)
 
-bdm_add_executable(multiple_simulations
+bdm_add_executable(smc_abc
                    HEADERS "${HEADERS}"
                    SOURCES "${SOURCES}"
                    LIBRARIES "${BDM_REQUIRED_LIBRARIES}")
