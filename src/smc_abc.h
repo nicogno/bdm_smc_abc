@@ -209,7 +209,7 @@ inline int Simulate(int argc, const char** argv) {
   random->SetSeed(time_seed.count());
 
   // Set algorithm parameters
-  int initial_number_of_particles = 100;  // 10
+  int initial_number_of_particles = 1000;  // 10
   const int number_of_parameters = 1;
   const real_t fraction_rejected_thresholds = 0.5;
   const real_t minimum_mcmc_acceptance_rate = 0.01;
