@@ -155,16 +155,16 @@ inline real_t GetCovarianceMatrix(std::vector<real_t> accepted_parameters) {
   return covariance_matrix;
 }
 
-inline std::vector<real_t> SampleRandomParams(
-    std::vector<real_t> old_parameters, int discarded, Random* rnd) {
-  std::vector<real_t> new_parameters;
-
+inline void SampleRandomParams(std::vector<real_t> old_parameters,
+                               std::vector<real_t>& new_parameters,
+                               int discarded, Random* rnd,
+                               std::vector<real_t> old_distances,
+                               std::vector<real_t>& new_distances) {
   for (size_t i = 0; i < discarded; i++) {
     int rnd_index = (int)std::floor(rnd->Uniform(0, old_parameters.size()));
-    new_parameters.push_back(old_parameters[rnd_index]);
+    new_parameters[i] = old_parameters[rnd_index];
+    new_distances[i] = old_distances[rnd_index];
   }
-
-  return new_parameters;
 }
 
 inline real_t MCMCMoveStep(real_t covariance,
@@ -209,7 +209,7 @@ inline int Simulate(int argc, const char** argv) {
   random->SetSeed(time_seed.count());
 
   // Set algorithm parameters
-  int initial_number_of_particles = 10;  // 10
+  int initial_number_of_particles = 100;  // 10
   const int number_of_parameters = 1;
   const real_t fraction_rejected_thresholds = 0.5;
   const real_t minimum_mcmc_acceptance_rate = 0.01;
@@ -242,13 +242,16 @@ inline int Simulate(int argc, const char** argv) {
   int discarded_particles = (int)std::floor(initial_number_of_particles *
                                             fraction_rejected_thresholds);
   step++;
-  real_t threhsold_t_1 = sorted_params_distances[initial_number_of_particles - discarded_particles - 1]
+  real_t threhsold_t_1 = sorted_params_distances[initial_number_of_particles -
+                                                 discarded_particles - 1]
                              .second;  // Next threshold
   real_t threhsold_t = sorted_params_distances[initial_number_of_particles - 1]
                            .second;  // Current threshold
 
   // Main algorithm loop
   while (threhsold_t > target_tolerance) {
+    std::cout << "Last threshold " << threhsold_t << ", accepted threshold "
+              << threhsold_t_1 << std::endl;
     std::vector<real_t> accepted_parameters = {
         sorted_division_rates.begin(),
         sorted_division_rates.end() - discarded_particles};
@@ -256,11 +259,13 @@ inline int Simulate(int argc, const char** argv) {
         sorted_distances.begin(), sorted_distances.end() - discarded_particles};
 
     real_t cov_matrix = GetCovarianceMatrix(accepted_parameters);
-    std::vector<real_t> proposed_parameters =
-        SampleRandomParams(accepted_parameters, discarded_particles, random);
-    std::vector<real_t> updated_distances(
-        proposed_parameters.size(),
-        std::numeric_limits<float>::max());  // Init vector
+    std::vector<real_t> updated_distances(discarded_particles,
+                                          0.0);  // Init vector
+    std::vector<real_t> proposed_parameters(discarded_particles,
+                                            0.0);  // Init vector
+    SampleRandomParams(accepted_parameters, proposed_parameters,
+                       discarded_particles, random, accepted_distances,
+                       updated_distances);  // Fill vectors
     real_t mcmc_trial_acceptance = 0.;
 
     if ((int)trial_MCMC_iterations <= 0) {
@@ -342,10 +347,10 @@ inline int Simulate(int argc, const char** argv) {
     trial_MCMC_iterations = std::ceil(MCMC_iterations / 2.);
 
     threhsold_t_1 =
-        sorted_distances[initial_number_of_particles - discarded_particles - 1]
-            .second;  // Next threshold
-    threhsold_t = sorted_distances[initial_number_of_particles - 1]
-                      .second;  // Current threshold
+        sorted_distances[initial_number_of_particles - discarded_particles -
+                         1];  // Next threshold
+    threhsold_t =
+        sorted_distances[initial_number_of_particles - 1];  // Current threshold
 
     std::cout << "FINISHED STEP " << step << std::endl;
     step++;
