@@ -67,7 +67,7 @@ inline std::vector<std::vector<int>> SetupRunSimulations(
     auto* rm = sim->GetResourceManager();
     auto* param = sim->GetParam();
     auto* sparam = param->Get<SimParam>();
-    //Log::Warning("Division rate ", sparam->division_rate);
+    // Log::Warning("Division rate ", sparam->division_rate);
     Cell* cell = new Cell(sparam->diam);
     cell->AddBehavior(new Divide());
     rm->AddAgent(cell);
@@ -123,15 +123,11 @@ inline std::vector<std::pair<real_t, real_t>> GetParamAndDistance(
   return param_distance;
 }
 
-inline std::vector<std::pair<real_t, real_t>> SortParamAndDistance(std::vector<std::pair<real_t, real_t>> param_distance) {
-
+inline std::vector<std::pair<real_t, real_t>> SortParamAndDistance(
+    std::vector<std::pair<real_t, real_t>> param_distance) {
   // Sort parameters based on distance
   std::sort(param_distance.begin(), param_distance.end(),
             [](auto& left, auto& right) { return left.second < right.second; });
-
-  for (auto values : param_distance) {
-    std::cout << values.first << "\t\t" << values.second << std::endl;
-  }
 
   return param_distance;
 }
@@ -164,7 +160,7 @@ inline std::vector<real_t> SampleRandomParams(
   std::vector<real_t> new_parameters;
 
   for (size_t i = 0; i < discarded; i++) {
-    int rnd_index = (int)std::floor(rnd->Uniform(0, discarded));
+    int rnd_index = (int)std::floor(rnd->Uniform(0, old_parameters.size()));
     new_parameters.push_back(old_parameters[rnd_index]);
   }
 
@@ -172,13 +168,12 @@ inline std::vector<real_t> SampleRandomParams(
 }
 
 inline real_t MCMCMoveStep(real_t covariance,
-                         std::vector<real_t> &proposed_parameters,
-                         real_t threhsold,
-                         std::vector<real_t> &updated_distances,
-                         size_t particle, Random* rnd) {
+                           std::vector<real_t>& proposed_parameters,
+                           real_t threhsold,
+                           std::vector<real_t>& updated_distances,
+                           size_t particle, Random* rnd) {
   real_t new_proposed_param = 0.;
-  do
-  {
+  do {
     new_proposed_param = rnd->Gaus(proposed_parameters[particle], covariance);
   } while (new_proposed_param < 0. || new_proposed_param > 1.);
   std::vector<real_t> new_proposed_param_vector{new_proposed_param};
@@ -196,8 +191,7 @@ inline real_t MCMCMoveStep(real_t covariance,
   }
 
   real_t mcmc_acceptance = std::min(1.0, distance_below_threshold);
-  if (rnd->Uniform(0., 1.) < mcmc_acceptance)
-  {
+  if (rnd->Uniform(0., 1.) < mcmc_acceptance) {
     proposed_parameters[particle] = new_proposed_param;
     updated_distances[particle] = new_distance;
   }
@@ -215,13 +209,13 @@ inline int Simulate(int argc, const char** argv) {
   random->SetSeed(time_seed.count());
 
   // Set algorithm parameters
-  int initial_number_of_particles = 10;
+  int initial_number_of_particles = 10;  // 10
   const int number_of_parameters = 1;
-  const real_t fraction_rejected_thresholds = 0.6; //0.5; TODO check
+  const real_t fraction_rejected_thresholds = 0.5;
   const real_t minimum_mcmc_acceptance_rate = 0.01;
   const real_t prob_not_moving_particle = 0.01;
-  int step = 1;  // t
-  real_t trial_MCMC_iterations = 50; //30.;
+  int step = 1;                       // t
+  real_t trial_MCMC_iterations = 30;  // 30.;
   real_t MCMC_iterations = 0;
   const real_t target_tolerance = 0.01;
 
@@ -235,13 +229,12 @@ inline int Simulate(int argc, const char** argv) {
       GetParamAndDistance(simulation_results_x, division_rates);
 
   std::vector<std::pair<real_t, real_t>> sorted_params_distances =
-  SortParamAndDistance(params_distances);
+      SortParamAndDistance(params_distances);
 
   std::vector<real_t> sorted_division_rates, sorted_distances;
 
   // Update with sorted values
-  for (auto pair : sorted_params_distances)
-  {
+  for (auto pair : sorted_params_distances) {
     sorted_division_rates.push_back(pair.first);
     sorted_distances.push_back(pair.second);
   }
@@ -249,114 +242,126 @@ inline int Simulate(int argc, const char** argv) {
   int discarded_particles = (int)std::floor(initial_number_of_particles *
                                             fraction_rejected_thresholds);
   step++;
-  real_t threhsold_t_1 =
-      sorted_params_distances[discarded_particles - 1].second;  // Next threshold
+  real_t threhsold_t_1 = sorted_params_distances[initial_number_of_particles - discarded_particles - 1]
+                             .second;  // Next threshold
   real_t threhsold_t = sorted_params_distances[initial_number_of_particles - 1]
                            .second;  // Current threshold
 
   // Main algorithm loop
   while (threhsold_t > target_tolerance) {
     std::vector<real_t> accepted_parameters = {
-    sorted_division_rates.begin(), sorted_division_rates.end() - discarded_particles};
+        sorted_division_rates.begin(),
+        sorted_division_rates.end() - discarded_particles};
     std::vector<real_t> accepted_distances = {
-    sorted_distances.begin(), sorted_distances.end() - discarded_particles};
+        sorted_distances.begin(), sorted_distances.end() - discarded_particles};
 
     real_t cov_matrix = GetCovarianceMatrix(accepted_parameters);
     std::vector<real_t> proposed_parameters =
         SampleRandomParams(accepted_parameters, discarded_particles, random);
-    std::vector<real_t> updated_distances(proposed_parameters.size(), std::numeric_limits<float>::max()); // Init vector
+    std::vector<real_t> updated_distances(
+        proposed_parameters.size(),
+        std::numeric_limits<float>::max());  // Init vector
     real_t mcmc_trial_acceptance = 0.;
 
-    if ((int)trial_MCMC_iterations <= 0)
-    {
-     Log::Warning("Trial MCMC iterations = 0!");
-     break;
+    if ((int)trial_MCMC_iterations <= 0) {
+      Log::Warning("Trial MCMC iterations = 0!");
+      break;
     }
 
     // First MCMC
-    for (size_t j = 0;
-         j < discarded_particles; j++)  // Loop particles
+    for (size_t j = 0; j < discarded_particles; j++)  // Loop particles
     {
       for (size_t k = 0; k < (int)trial_MCMC_iterations; k++)  // Loop MCMC
       {
-        mcmc_trial_acceptance+=MCMCMoveStep(cov_matrix, proposed_parameters, threhsold_t,
-                     updated_distances, j, random);
+        mcmc_trial_acceptance +=
+            MCMCMoveStep(cov_matrix, proposed_parameters, threhsold_t_1,
+                         updated_distances, j, random);
       }
       std::cout << "Finished MCMC for particle " << j << std::endl;
     }
 
-    real_t mcmc_acceptance = mcmc_trial_acceptance; // Must be done before the upcoming division
+    real_t mcmc_acceptance =
+        mcmc_trial_acceptance;  // Must be done before the upcoming division
 
     // Update MCMC trial acceptance rate
-    mcmc_trial_acceptance/= (trial_MCMC_iterations*(initial_number_of_particles-discarded_particles));
+    mcmc_trial_acceptance /= (trial_MCMC_iterations * discarded_particles);
 
     // Update MCMC iterations
-    MCMC_iterations = (int)std::floor(std::log(prob_not_moving_particle)/(1+std::log(1-mcmc_trial_acceptance)));
+    MCMC_iterations = (int)std::ceil(std::log(prob_not_moving_particle) /
+                                     (1 + std::log(1 - mcmc_trial_acceptance)));
 
-    int additional_MCMC_iterations = (int)std::max(0,(int)MCMC_iterations - (int)trial_MCMC_iterations);
+    int additional_MCMC_iterations =
+        (int)std::max(0, (int)MCMC_iterations - (int)trial_MCMC_iterations);
+
+    std::cout << "Additional MCMC steps " << additional_MCMC_iterations
+              << std::endl;
 
     // Second MCMC
-    for (size_t j = 0;
-         j < discarded_particles; j++)  // Loop particles
+    for (size_t j = 0; j < discarded_particles; j++)  // Loop particles
     {
       for (size_t k = 0; k < additional_MCMC_iterations; k++)  // Loop MCMC
       {
-        mcmc_acceptance+=MCMCMoveStep(cov_matrix, proposed_parameters, threhsold_t,
-                     updated_distances, j, random);
+        mcmc_acceptance +=
+            MCMCMoveStep(cov_matrix, proposed_parameters, threhsold_t_1,
+                         updated_distances, j, random);
       }
     }
 
     // Update MCMC acceptance rate
-    mcmc_acceptance/= (MCMC_iterations*(initial_number_of_particles-discarded_particles));
+    mcmc_acceptance /= (MCMC_iterations * discarded_particles);
 
     // Merge and sort vectors
     sorted_division_rates.clear();
     sorted_distances.clear();
-    sorted_division_rates.insert(sorted_division_rates.end(), accepted_parameters.begin(), accepted_parameters.end());
-    sorted_division_rates.insert(sorted_division_rates.end(), proposed_parameters.begin(), proposed_parameters.end());
-    sorted_distances.insert(sorted_distances.end(), accepted_distances.begin(), accepted_distances.end());
-    sorted_distances.insert(sorted_distances.end(), updated_distances.begin(), updated_distances.end());
+    sorted_division_rates.insert(sorted_division_rates.end(),
+                                 accepted_parameters.begin(),
+                                 accepted_parameters.end());
+    sorted_division_rates.insert(sorted_division_rates.end(),
+                                 proposed_parameters.begin(),
+                                 proposed_parameters.end());
+    sorted_distances.insert(sorted_distances.end(), accepted_distances.begin(),
+                            accepted_distances.end());
+    sorted_distances.insert(sorted_distances.end(), updated_distances.begin(),
+                            updated_distances.end());
 
     // Update with sorted values
-    for (int i = 0; i<sorted_params_distances.size(); i++)
-    {
+    for (int i = 0; i < sorted_params_distances.size(); i++) {
       sorted_params_distances[i].first = sorted_division_rates[i];
       sorted_params_distances[i].second = sorted_distances[i];
     }
-    
+
     // Sort
     sorted_params_distances = SortParamAndDistance(sorted_params_distances);
 
     // Split
-      for (int i = 0; i<sorted_params_distances.size(); i++)
-      {
+    for (int i = 0; i < sorted_params_distances.size(); i++) {
       sorted_division_rates[i] = sorted_params_distances[i].first;
       sorted_distances[i] = sorted_params_distances[i].second;
     }
-    
-    trial_MCMC_iterations = std::floor(MCMC_iterations / 2.);
+
+    trial_MCMC_iterations = std::ceil(MCMC_iterations / 2.);
 
     threhsold_t_1 =
-        params_distances[discarded_particles - 1].second;  // Next threshold
-    threhsold_t = params_distances[initial_number_of_particles - 1]
+        sorted_distances[initial_number_of_particles - discarded_particles - 1]
+            .second;  // Next threshold
+    threhsold_t = sorted_distances[initial_number_of_particles - 1]
                       .second;  // Current threshold
 
     std::cout << "FINISHED STEP " << step << std::endl;
     step++;
     // Exit if minimum acceptance reached
-    if (mcmc_acceptance < minimum_mcmc_acceptance_rate)
-    {
+    if (mcmc_acceptance < minimum_mcmc_acceptance_rate) {
       Log::Warning("MCMC acceptance < minimum MCMC acceptance rate!");
       break;
     }
   }
 
   std::cout << "Final params and distances" << std::endl;
-  for (size_t i = 0; i < sorted_division_rates.size(); i++)
-  {
-     std::cout << sorted_division_rates[i] << "\t" << sorted_distances[i] << std::endl;
+  for (size_t i = 0; i < sorted_division_rates.size(); i++) {
+    std::cout << sorted_division_rates[i] << "\t" << sorted_distances[i]
+              << std::endl;
   }
-  
+
   std::cout << "Simulation completed successfully!\n";
   return 0;
 }
