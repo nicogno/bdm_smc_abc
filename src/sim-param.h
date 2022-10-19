@@ -15,6 +15,7 @@ struct SimParam : public ParamGroup {
   int simulation_time = 1000;
   int count_cell_freq = 100;
   real_t division_rate = 0.0;
+  real_t apoptosis_rate = 0.0;
 };
 
 }  // namespace bdm

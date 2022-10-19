@@ -32,10 +32,7 @@ inline std::vector<real_t> GetParamsFromPrior(int particles, Random* rnd) {
   return division_rates;
 }
 
-inline std::vector<std::vector<int>> SetupRunSimulations(
-    std::vector<real_t> parameters) {
-  real_t current_division_rate = 0.;
-
+inline std::vector<int> SetupRunSimulation(std::vector<real_t> parameters) {
   auto set_param = [&](Param* param) {
     // BDM default pars
     param->export_visualization = false;
@@ -44,92 +41,65 @@ inline std::vector<std::vector<int>> SetupRunSimulations(
 
     // Custom pars
     auto* sparam = param->Get<SimParam>();
-    sparam->division_rate = current_division_rate;
+    sparam->division_rate = parameters[0];
   };
 
-  // Create num simulations
-  std::vector<Simulation*> simulations;
-  std::vector<std::vector<int>> results_x;
+  Simulation sim("test", set_param);
 
-  for (size_t i = 0; i < parameters.size(); i++) {
-    current_division_rate =
-        parameters[i];  // Set custom pars for this simulation
-    simulations.push_back(
-        new Simulation("test" + std::to_string(i), set_param));
-  }
-  // Initialize the model for each simulation
-  for (auto* sim : simulations) {
-    // If we switch between simulations we must call the function Activate();
-    // Only one simulation can be active at any given time.
-    sim->Activate();
+  std::vector<int> results_x;
 
-    // Create initial model
-    auto* rm = sim->GetResourceManager();
-    auto* param = sim->GetParam();
-    auto* sparam = param->Get<SimParam>();
-    // Log::Warning("Division rate ", sparam->division_rate);
-    Cell* cell = new Cell(sparam->diam);
-    cell->AddBehavior(new Divide());
-    rm->AddAgent(cell);
-  }
+  // Create initial model
+  auto* rm = sim->GetResourceManager();
+  auto* param = sim->GetParam();
+  auto* sparam = param->Get<SimParam>();
+  // Log::Warning("Division rate ", sparam->division_rate);
+  Cell* cell = new Cell(sparam->diam);
+  cell->AddBehavior(new Divide());
+  cell->AddBehavior(new Apoptosis());
+  rm->AddAgent(cell);
 
-  for (auto* sim : simulations) {
-    sim->Activate();
-    auto* param = sim->GetParam();
-    auto* sparam = param->Get<SimParam>();
-    auto* count_cells = NewOperation("count_cells");
-    count_cells->frequency_ = sparam->count_cell_freq;
-    sim->GetScheduler()->ScheduleOp(count_cells);
-    sim->GetScheduler()->Simulate(sparam->simulation_time);
-    results_x.push_back(
-        count_cells->GetImplementation<CountCells>()->GetMeasurements());
-  }
-
-  // Delete simulations
-  for (auto* sim : simulations) {
-    sim->Activate();
-    delete sim;
-  }
+  auto* param = sim->GetParam();
+  auto* sparam = param->Get<SimParam>();
+  auto* count_cells = NewOperation("count_cells");
+  count_cells->frequency_ = sparam->count_cell_freq;
+  sim->GetScheduler()->ScheduleOp(count_cells);
+  sim->GetScheduler()->Simulate(sparam->simulation_time);
+  results_x.push_back(
+      count_cells->GetImplementation<CountCells>()->GetMeasurements());
 
   return results_x;
 }
 
-inline std::vector<std::pair<real_t, real_t>> GetParamAndDistance(
-    std::vector<std::vector<int>> simulation_results_x,
-    std::vector<real_t> parameters) {
-  std::vector<std::pair<real_t, real_t>>
-      param_distance;  // Pairs of parameters and distances to be evaluated
+inline real_t GetDistance(std::vector<int> simulation_results_x) {
   std::array<int, 10> experimental_data_y = {1,  5,  10, 15, 20,
                                              25, 30, 35, 40, 45};
-  std::vector<real_t> distances;
-  int out_counter = 0;
+  real_t distance = 0.0;
 
   for (auto res : simulation_results_x) {
-    real_t temp_distance = 0.0;
-    int int_counter = 0;
-    for (auto values : res) {
-      std::cout << experimental_data_y[int_counter] << " " << values << "\t\t";
-      temp_distance +=
-          (pow(log2(experimental_data_y[int_counter]) - log2(values), 2));
-      int_counter++;
-    }
-    distances.push_back(temp_distance);
-    std::cout << distances.back() << std::endl;
-    param_distance.push_back(
-        std::make_pair(parameters[out_counter], distances.back()));
-    out_counter++;
+    distance += (pow(log2(experimental_data_y[int_counter]) - log2(res), 2));
+    int_counter++;
   }
-
-  return param_distance;
+  return distance;
 }
 
-inline std::vector<std::pair<real_t, real_t>> SortParamAndDistance(
-    std::vector<std::pair<real_t, real_t>> param_distance) {
+inline void SortParamAndDistance(std::vector<std::vector<real_t>>& params,
+                                 std::vector<real_t>& distances) {
+  std::vector<std::pair<std::vector<real_t>, real_t>> params_distances;
+
+  // Merge
+  for (size_t i = 0; i < params.size(); i++) {
+    params_distances.push_back(std::make_pair(params[i], distances[i]));
+  }
+
   // Sort parameters based on distance
   std::sort(param_distance.begin(), param_distance.end(),
             [](auto& left, auto& right) { return left.second < right.second; });
 
-  return param_distance;
+  // Split
+  for (size_t i = 0; i < params_distances.size(); i++) {
+    params[i] = params_distances[i].first;
+    distances[i] = params_distances[i].second;
+  }
 }
 
 inline real_t GetMean(std::vector<real_t> values) {
@@ -141,22 +111,45 @@ inline real_t GetMean(std::vector<real_t> values) {
   return mean / values.size();
 }
 
-inline real_t GetCovarianceMatrix(std::vector<real_t> accepted_parameters) {
-  real_t covariance_matrix = 0.;
-
-  real_t mean = GetMean(accepted_parameters);
-
-  for (auto measure : accepted_parameters) {
-    covariance_matrix += (pow(measure - mean, 2));
+inline real_t GetVariance(std::vector<real_t> values_1, std::vector<real_t> values_2, real_t mean_1, real_t mean_2) {
+  real_t variance = 0.;
+  for (size_t i = 0; i < count; i++)
+  {
+    variance += ((values_1[i]-mean_1)*(values_2[i]-mean_2));
   }
 
-  covariance_matrix /= accepted_parameters.size();
+  return variance / values_1.size();
+}
+
+inline std::vector<std::vector<real_t>> GetCovarianceMatrix(std::vector<std::vector<real_t>> parameters, int number_of_pars) {
+  
+  /////////////////////////////////////////
+  //////      ( s(x. x) s(x, y) )
+  ////// C =  (                 )
+  //////      ( s(y, x) s(y, y) )
+  /////////////////////////////////////////
+  /// In parameters, each outer element is a parameter and for each parameter we have N measurements (inner elements)
+  std::vector<std::vector<real_t>> covariance_matrix(number_of_pars, std::vector<real_t>(number_of_pars, 0.0));
+  std::vector<real_t> means;
+
+  for (auto par : parameters)
+  {
+    means.push_back(GetMean(par));
+  }
+
+  for (size_t i = 0; i < parameters.size(); i++)
+  {
+    for (size_t j = 0; j < parameters.size(); j++) 
+    {
+      covariance_matrix[i][j] = GetVariance(parameters[i], parameters[j], means[i], means[j]);
+    }
+  }
 
   return covariance_matrix;
 }
 
-inline void SampleRandomParams(std::vector<real_t> old_parameters,
-                               std::vector<real_t>& new_parameters,
+inline void SampleRandomParams(std::vector<std::vector<real_t>> old_parameters,
+                              std::vector<std::vector<real_t>>& new_parameters,
                                int discarded, Random* rnd,
                                std::vector<real_t> old_distances,
                                std::vector<real_t>& new_distances) {
@@ -167,22 +160,28 @@ inline void SampleRandomParams(std::vector<real_t> old_parameters,
   }
 }
 
-inline real_t MCMCMoveStep(real_t covariance,
-                           std::vector<real_t>& proposed_parameters,
+inline real_t MCMCMoveStep(std::vector<std::vector<real_t>> covariance,
+                          std::vector<std::vector<real_t>>& proposed_parameters,
                            real_t threhsold,
-                           std::vector<real_t>& updated_distances,
-                           size_t particle, Random* rnd) {
-  real_t new_proposed_param = 0.;
-  do {
-    new_proposed_param = rnd->Gaus(proposed_parameters[particle], covariance);
-  } while (new_proposed_param < 0. || new_proposed_param > 1.);
-  std::vector<real_t> new_proposed_param_vector{new_proposed_param};
-  std::vector<std::vector<int>> simulation_results_x =
-      SetupRunSimulations(new_proposed_param_vector);
-  std::vector<std::pair<real_t, real_t>> params_distances =
-      GetParamAndDistance(simulation_results_x, new_proposed_param_vector);
-  real_t new_distance =
-      params_distances[0].second;  // We ran a single simulation
+                           std::vector<real_t>& updated_distances, int particle, Random* rnd, int nb_params) {
+  std::vector<real_t> new_proposed_params(nb_params, 0.);
+  for (size_t i = 0; i < nb_params; i++) {
+    real_t temp_val = 0.0;
+    do {
+      temp_val = rnd->Gaus(proposed_parameters[particle], covariance);
+    } while (temp_val < 0. || temp_val > 1.);
+    new_proposed_params[0] = temp_val;
+    temp_val = 0.0;
+    do {
+      temp_val = rnd->Gaus(proposed_parameters[particle], covariance);
+    } while (temp_val < 0. || temp_val > 1.);
+    new_proposed_params[1] = temp_val;
+  }
+
+  std::vector<int> simulation_results_x =
+      SetupRunSimulation(new_proposed_params);
+  real_t> new_distance =
+      GetDistance(simulation_results_x);
 
   real_t distance_below_threshold = 0;
 
@@ -210,7 +209,7 @@ inline int Simulate(int argc, const char** argv) {
 
   // Set algorithm parameters
   int initial_number_of_particles = 1000;  // 10
-  const int number_of_parameters = 1;
+  const int number_of_parameters = 2;
   const real_t fraction_rejected_thresholds = 0.5;
   const real_t minimum_mcmc_acceptance_rate = 0.01;
   const real_t prob_not_moving_particle = 0.01;
@@ -222,47 +221,43 @@ inline int Simulate(int argc, const char** argv) {
   std::vector<real_t> division_rates =
       GetParamsFromPrior(initial_number_of_particles, random);
 
-  std::vector<std::vector<int>> simulation_results_x =
-      SetupRunSimulations(division_rates);
+  std::vector<real_t> apoptosis_rates =
+      GetParamsFromPrior(initial_number_of_particles, random);
 
-  std::vector<std::pair<real_t, real_t>> params_distances =
-      GetParamAndDistance(simulation_results_x, division_rates);
+  std::vector<std::vector<int>> simulation_results_x;
+  std::vector<std::vector<real_t>> parameters;
+  std::vector<real_t> distances;
 
-  std::vector<std::pair<real_t, real_t>> sorted_params_distances =
-      SortParamAndDistance(params_distances);
-
-  std::vector<real_t> sorted_division_rates, sorted_distances;
-
-  // Update with sorted values
-  for (auto pair : sorted_params_distances) {
-    sorted_division_rates.push_back(pair.first);
-    sorted_distances.push_back(pair.second);
+  for (size_t i = 0; i < initial_number_of_particles; i++) {
+    parameters.push_back({division_rates[i], apoptosis_rates[i]});
+    simulation_results_x.push_back(SetupRunSimulation(parameters.back()));
+    distances.push_back(GetDistance(simulation_results_x.back()));
   }
+
+  SortParamAndDistance(parameters, distances);
 
   int discarded_particles = (int)std::floor(initial_number_of_particles *
                                             fraction_rejected_thresholds);
   step++;
-  real_t threhsold_t_1 = sorted_params_distances[initial_number_of_particles -
-                                                 discarded_particles - 1]
-                             .second;  // Next threshold
-  real_t threhsold_t = sorted_params_distances[initial_number_of_particles - 1]
-                           .second;  // Current threshold
+  real_t threhsold_t_1 = distances[initial_number_of_particles -
+                                                 discarded_particles - 1];  // Next threshold
+  real_t threhsold_t = distances[initial_number_of_particles - 1];  // Current threshold
 
   // Main algorithm loop
   while (threhsold_t > target_tolerance) {
     std::cout << "Last threshold " << threhsold_t << ", accepted threshold "
               << threhsold_t_1 << std::endl;
-    std::vector<real_t> accepted_parameters = {
-        sorted_division_rates.begin(),
-        sorted_division_rates.end() - discarded_particles};
+    std::vector<std::vector<real_t>> accepted_parameters = {
+        parameters.begin(),
+    parameters.end() - discarded_particles};
     std::vector<real_t> accepted_distances = {
-        sorted_distances.begin(), sorted_distances.end() - discarded_particles};
+    distances.begin(), distances.end() - discarded_particles};
 
-    real_t cov_matrix = GetCovarianceMatrix(accepted_parameters);
+    std::vector<std::vector<real_t>> cov_matrix = GetCovarianceMatrix(accepted_parameters, number_of_parameters);
     std::vector<real_t> updated_distances(discarded_particles,
                                           0.0);  // Init vector
-    std::vector<real_t> proposed_parameters(discarded_particles,
-                                            0.0);  // Init vector
+    std::vector<std::vector<real_t>> proposed_parameters(discarded_particles,
+                                            std::vector(number_of_parameters, 0.0));  // Init vector
     SampleRandomParams(accepted_parameters, proposed_parameters,
                        discarded_particles, random, accepted_distances,
                        updated_distances);  // Fill vectors
@@ -280,7 +275,7 @@ inline int Simulate(int argc, const char** argv) {
       {
         mcmc_trial_acceptance +=
             MCMCMoveStep(cov_matrix, proposed_parameters, threhsold_t_1,
-                         updated_distances, j, random);
+                         updated_distances, j, random, number_of_parameters);
       }
       std::cout << "Finished MCMC for particle " << j << std::endl;
     }
@@ -308,7 +303,7 @@ inline int Simulate(int argc, const char** argv) {
       {
         mcmc_acceptance +=
             MCMCMoveStep(cov_matrix, proposed_parameters, threhsold_t_1,
-                         updated_distances, j, random);
+                         updated_distances, j, random, number_of_parameters);
       }
     }
 
