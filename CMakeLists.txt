@@ -26,4 +26,4 @@ file(GLOB_RECURSE SOURCES src/*.cc)
 bdm_add_executable(smc_abc
                    HEADERS "${HEADERS}"
                    SOURCES "${SOURCES}"
-                   LIBRARIES "${BDM_REQUIRED_LIBRARIES}")
+                   LIBRARIES "${BDM_REQUIRED_LIBRARIES}" lapack blas)
