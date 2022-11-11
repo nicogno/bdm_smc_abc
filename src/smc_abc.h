@@ -47,7 +47,8 @@ inline stdvec mat_to_std_vec(arma::mat& M) {
 }
 
 inline arma::mat std_vec_vec_to_mat(stdvecvec& SVV) {
-  arma::mat M(SVV.size(), SVV.size(), arma::fill::zeros);
+  //mat(n_rows, n_cols)
+  arma::mat M(SVV[0].size(), SVV.size(), arma::fill::zeros);
   for (size_t i = 0; i < SVV.size(); ++i) {
     M.col(i) = arma::conv_to<arma::vec>::from(SVV[i]);
   };
@@ -62,11 +63,11 @@ inline arma::mat std_vec_to_vec(stdvec& SV) {
 }
 
 inline stdvec GetParamsFromPrior(int particles, Random* rnd) {
-  stdvec division_rates;
+  stdvec params;
   for (size_t i = 0; i < particles; i++) {
-    division_rates.push_back(rnd->Uniform(0., 0.3));
+    params.push_back(rnd->Uniform(0., 0.3));
   }
-  return division_rates;
+  return params;
 }
 
 inline std::vector<int> SetupRunSimulation(stdvec parameters) {
@@ -136,54 +137,6 @@ inline void SortParamAndDistance(stdvecvec& params, stdvec& distances) {
   }
 }
 
-inline real_t GetMean(stdvec values) {
-  real_t mean = 0.;
-  for (auto val : values) {
-    mean += val;
-  }
-
-  return mean / values.size();
-}
-
-inline real_t GetVariance(stdvec values_1, stdvec values_2, real_t mean_1,
-                          real_t mean_2) {
-  real_t variance = 0.;
-  for (size_t i = 0; i < values_1.size(); i++) {
-    variance += ((values_1[i] - mean_1) * (values_2[i] - mean_2));
-  }
-
-  if (values_1.size() == 1) {
-    return variance / 1.;  // Normalize by 1
-  } else {
-    return variance / (values_1.size() - 1);  // Normalize by n_obs - 1
-  }
-}
-
-inline stdvecvec GetCovarianceMatrix(stdvecvec parameters, int number_of_pars) {
-  /////////////////////////////////////////
-  //////      ( s(x. x) s(x, y) )
-  ////// C =  (                 )
-  //////      ( s(y, x) s(y, y) )
-  /////////////////////////////////////////
-  /// In parameters, each outer element is a parameter and for each parameter we
-  /// have N measurements (inner elements)
-  stdvecvec covariance_matrix(number_of_pars, stdvec(number_of_pars, 0.0));
-  stdvec means;
-
-  for (auto par : parameters) {
-    means.push_back(GetMean(par));
-  }
-
-  for (size_t i = 0; i < parameters.size(); i++) {
-    for (size_t j = 0; j < parameters.size(); j++) {
-      covariance_matrix[i][j] =
-          GetVariance(parameters[i], parameters[j], means[i], means[j]);
-    }
-  }
-
-  return covariance_matrix;
-}
-
 inline void SampleRandomParams(stdvecvec old_parameters,
                                stdvecvec& new_parameters, int discarded,
                                Random* rnd, stdvec old_distances,
@@ -195,11 +148,10 @@ inline void SampleRandomParams(stdvecvec old_parameters,
   }
 }
 
-inline real_t MCMCMoveStep(stdvecvec covariance, stdvecvec& proposed_parameters,
+inline real_t MCMCMoveStep(arma::mat covariance_mat, stdvecvec& proposed_parameters,
                            real_t threhsold, stdvec& updated_distances,
                            int particle, Random* rnd, int nb_params) {
   stdvec new_proposed_params(nb_params, 0.);
-  arma::mat covariance_mat = std_vec_vec_to_mat(covariance);
 
   arma::vec proposed_parameters_vec =
       std_vec_to_vec(proposed_parameters[particle]);
@@ -218,7 +170,7 @@ inline real_t MCMCMoveStep(stdvecvec covariance, stdvecvec& proposed_parameters,
     distance_below_threshold = 1;
   }
 
-  real_t mcmc_acceptance = std::min(1.0, distance_below_threshold);
+  real_t mcmc_acceptance = std::min(1.0, distance_below_threshold*prior_ratio);
   if (rnd->Uniform(0., 1.) < mcmc_acceptance) {
     proposed_parameters[particle] = new_proposed_params;
     updated_distances[particle] = new_distance;
@@ -237,7 +189,7 @@ inline int Simulate(int argc, const char** argv) {
   random->SetSeed(time_seed.count());
 
   // Set algorithm parameters
-  int initial_number_of_particles = 1000;  // 10
+  int initial_number_of_particles = 10;  // 1000
   const int number_of_parameters = 2;
   const real_t fraction_rejected_thresholds = 0.5;
   const real_t minimum_mcmc_acceptance_rate = 0.01;
@@ -258,7 +210,7 @@ inline int Simulate(int argc, const char** argv) {
   stdvec distances;
 
   for (size_t i = 0; i < initial_number_of_particles; i++) {
-    parameters.push_back({division_rates[i], apoptosis_rates[i]});
+    parameters.push_back({division_rates[i], apoptosis_rates[i]});  // Each column is a particle with n_params parameters
     simulation_results_x.push_back(SetupRunSimulation(parameters.back()));
     distances.push_back(GetDistance(simulation_results_x.back()));
   }
@@ -273,6 +225,17 @@ inline int Simulate(int argc, const char** argv) {
   real_t threhsold_t =
       distances[initial_number_of_particles - 1];  // Current threshold
 
+  std::cout << "initial pars \n";
+  for (auto val : parameters)
+  {
+    for (auto par : val)
+    {
+      std::cout << par << "\t";
+    }
+    std::cout << "\n";
+  }
+  
+  
   // Main algorithm loop
   while (threhsold_t > target_tolerance) {
     std::cout << "Last threshold " << threhsold_t << ", accepted threshold "
@@ -281,14 +244,14 @@ inline int Simulate(int argc, const char** argv) {
                                      parameters.end() - discarded_particles};
     stdvec accepted_distances = {distances.begin(),
                                  distances.end() - discarded_particles};
-    std::cout << "OKKKKKKKKK 1 " << std::endl;
-    stdvecvec cov_matrix =
-        GetCovarianceMatrix(accepted_parameters, number_of_parameters);
+    arma::mat accepted_parameters_mat = std_vec_vec_to_mat(accepted_parameters);
+    inplace_trans(accepted_parameters_mat); // We must traponse the matrix since the cov function needs measurements in the rows and vars in the columns
+    arma::mat cov_matrix = cov(accepted_parameters_mat);
+
     stdvec updated_distances(discarded_particles,
                              0.0);  // Init vector
     stdvecvec proposed_parameters(
         discarded_particles, stdvec(number_of_parameters, 0.0));  // Init vector
-    std::cout << "OKKKKKKKKK 2 " << std::endl;
     SampleRandomParams(accepted_parameters, proposed_parameters,
                        discarded_particles, random, accepted_distances,
                        updated_distances);  // Fill vectors
@@ -298,8 +261,6 @@ inline int Simulate(int argc, const char** argv) {
       Log::Warning("Trial MCMC iterations = 0!");
       break;
     }
-
-    std::cout << "OKKKKKKKKK 3 " << std::endl;
 
     // First MCMC
     for (size_t j = 0; j < discarded_particles; j++)  // Loop particles
