@@ -22,6 +22,7 @@
 #include "biodynamo.h"
 #include "custom_ops.h"
 #include "sim-param.h"
+#include <TH1F.h>
 
 namespace bdm {
 
@@ -60,6 +61,13 @@ inline arma::mat std_vec_to_vec(stdvec& SV) {
   V = arma::conv_to<arma::vec>::from(SV);
 
   return V;
+}
+
+inline stdvec vec_to_std_vec(arma::vec& V) {
+  stdvec SV(V.size(), 0.0);
+  SV = arma::conv_to<stdvec>::from(V);
+
+  return SV;
 }
 
 inline std::vector<int> SetupRunSimulation(stdvec parameters) {
@@ -144,7 +152,8 @@ inline void SampleRandomParams(stdvecvec old_parameters,
 inline stdvec DrawParamsFromPrior(Random* rnd, int nb_params) {
   stdvec parameters(nb_params, 0.0);
 
-  parameters[0] = rnd->Uniform(0., 0.3);  // Division rate
+  //parameters[0] = rnd->Uniform(0., 0.3);  // Division rate
+  parameters[0] = rnd->Uniform(0., 1.0);  // Division rate
   parameters[1] = rnd->Uniform(0., 1.0);  // Apoptosis rate
 
   return parameters;
@@ -152,50 +161,45 @@ inline stdvec DrawParamsFromPrior(Random* rnd, int nb_params) {
 
 // Define custom prior and get param probability
 inline real_t GetPriorProbability(stdvec& parameters) {
-  real_t probability = 1.0;
+  real_t joint_probability = 1.0;
   stdvec prob_vector(parameters.size(), 0.0);
 
   // Prior probability
-  if (parameters[0] >= 0.0 && parameters[0] <= 0.3) {
-    prob_vector[0] = 1.0;
+  if (parameters[0] >= 0.0 && parameters[0] <= 1.0) {
+    prob_vector[0] = 1.0 / (1.0 - 0.0);
   } else {
     prob_vector[0] = 0.0;
   }
   if (parameters[1] >= 0.0 && parameters[1] <= 1.0) {
-    prob_vector[1] = 1.0;
+    prob_vector[1] = 1.0 / (1.0 - 0.0);
   } else {
     prob_vector[1] = 0.0;
   }
 
   // Compute joint probability
   for (auto prob : prob_vector) {
-    probability *= prob;
+    joint_probability *= prob;
   }
 
-  return probability;
+  return joint_probability;
 }
 
-inline real_t MCMCMoveStep(arma::mat covariance_mat,
+inline real_t MCMCMoveStep(arma::vec new_proposed_params_vec,
                            stdvecvec& proposed_parameters, real_t threhsold,
                            stdvec& updated_distances, int particle, Random* rnd,
                            int nb_params) {
-  stdvec new_proposed_params(nb_params, 0.);
 
-  arma::vec proposed_parameters_vec =
-      std_vec_to_vec(proposed_parameters[particle]);
-  arma::mat new_proposed_params_mat =
-      arma::mvnrnd(proposed_parameters_vec, covariance_mat,
-                   1);  // Generate proposed parameters
-  new_proposed_params = mat_to_std_vec(new_proposed_params_mat);
+  stdvec new_proposed_params = vec_to_std_vec(new_proposed_params_vec);
 
   std::vector<int> simulation_results_x =
       SetupRunSimulation(new_proposed_params);
+
   real_t new_distance = GetDistance(simulation_results_x);
 
-  real_t distance_below_threshold = 0;
+  real_t distance_below_threshold = 0.0;
 
   if (new_distance < threhsold) {
-    distance_below_threshold = 1;
+    distance_below_threshold = 1.0;
   }
 
   real_t prior_ratio = GetPriorProbability(new_proposed_params) /
@@ -291,10 +295,15 @@ inline int Simulate(int argc, const char** argv) {
     // First MCMC
     for (size_t j = 0; j < discarded_particles; j++)  // Loop particles
     {
+      arma::vec proposed_parameters_vec =
+          std_vec_to_vec(proposed_parameters[j]);
+      arma::mat new_proposed_params_mat =
+          arma::mvnrnd(proposed_parameters_vec, cov_matrix,
+      (int)trial_MCMC_iterations);  // Generate proposed parameters
       for (size_t k = 0; k < (int)trial_MCMC_iterations; k++)  // Loop MCMC
       {
         mcmc_trial_acceptance +=
-            MCMCMoveStep(cov_matrix, proposed_parameters, threhsold_t_1,
+            MCMCMoveStep(new_proposed_params_mat.col(k), proposed_parameters, threhsold_t_1,
                          updated_distances, j, random, number_of_parameters);
       }
       std::cout << "Finished MCMC for particle " << j << std::endl;
@@ -319,11 +328,19 @@ inline int Simulate(int argc, const char** argv) {
     // Second MCMC
     for (size_t j = 0; j < discarded_particles; j++)  // Loop particles
     {
-      for (size_t k = 0; k < additional_MCMC_iterations; k++)  // Loop MCMC
+      arma::vec proposed_parameters_vec =
+          std_vec_to_vec(proposed_parameters[j]);
+      arma::mat new_proposed_params_mat =
+          arma::mvnrnd(proposed_parameters_vec, cov_matrix,
+      (int)additional_MCMC_iterations);  // Generate proposed parameters
+      for (size_t k = 0; k < (int)additional_MCMC_iterations; k++)  // Loop MCMC
       {
         mcmc_acceptance +=
-            MCMCMoveStep(cov_matrix, proposed_parameters, threhsold_t_1,
+            MCMCMoveStep(new_proposed_params_mat.col(k), proposed_parameters, threhsold_t_1,
                          updated_distances, j, random, number_of_parameters);
+      }
+      if (additional_MCMC_iterations > 0) {
+        std::cout << "Finished additional MCMC for particle " << j << std::endl;
       }
     }
 
@@ -362,13 +379,28 @@ inline int Simulate(int argc, const char** argv) {
   }
 
   std::cout << "Final params and distances" << std::endl;
-  for (size_t i = 0; i < parameters.size(); i++) {
-    std::cout << "Parameters" << std::endl;
-    for (auto par : parameters[i]) {
-      std::cout << par << "\t";
+  TCanvas *c1 = new TCanvas("c1","Candle Decay",800,600);
+  c1->Divide(number_of_parameters,1);
+  TH1F *h[number_of_parameters];
+  h[0] = new TH1F("Division", "Division rate", 20, 0, 1);
+  h[1] = new TH1F("Apoptosis", "Apoptosis rate", 20, 0, 1);
+  for (size_t particle = 0; particle < parameters.size(); particle++) {
+    std::cout << "Parameters \t";
+    for (size_t param = 0; param < parameters[particle].size(); param++) {
+      std::cout << parameters[particle][param] << "\t";
+      h[param]->Fill(parameters[particle][param]);
     }
-    std::cout << "Distances \t" << distances[i] << std::endl;
+    std::cout << "Distances \t" << distances[particle] << std::endl;
   }
+  
+  for (size_t subc = 0; subc < number_of_parameters; subc++)
+  {
+    c1->cd(subc+1);
+    h[subc]->Draw();
+  }
+  
+  c1->SaveAs("/Users/marcodurante/smc_abc/histo.pdf");
+  c1->SaveAs("/Users/marcodurante/smc_abc/histo.root");
 
   std::cout << "Simulation completed successfully!\n";
   return 0;
