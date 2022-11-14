@@ -47,7 +47,7 @@ inline stdvec mat_to_std_vec(arma::mat& M) {
 }
 
 inline arma::mat std_vec_vec_to_mat(stdvecvec& SVV) {
-  //mat(n_rows, n_cols)
+  // mat(n_rows, n_cols)
   arma::mat M(SVV[0].size(), SVV.size(), arma::fill::zeros);
   for (size_t i = 0; i < SVV.size(); ++i) {
     M.col(i) = arma::conv_to<arma::vec>::from(SVV[i]);
@@ -60,14 +60,6 @@ inline arma::mat std_vec_to_vec(stdvec& SV) {
   V = arma::conv_to<arma::vec>::from(SV);
 
   return V;
-}
-
-inline stdvec GetParamsFromPrior(int particles, Random* rnd) {
-  stdvec params;
-  for (size_t i = 0; i < particles; i++) {
-    params.push_back(rnd->Uniform(0., 0.3));
-  }
-  return params;
 }
 
 inline std::vector<int> SetupRunSimulation(stdvec parameters) {
@@ -148,9 +140,45 @@ inline void SampleRandomParams(stdvecvec old_parameters,
   }
 }
 
-inline real_t MCMCMoveStep(arma::mat covariance_mat, stdvecvec& proposed_parameters,
-                           real_t threhsold, stdvec& updated_distances,
-                           int particle, Random* rnd, int nb_params) {
+// Define custom priors and get params
+inline stdvec DrawParamsFromPrior(Random* rnd, int nb_params) {
+  stdvec parameters(nb_params, 0.0);
+
+  parameters[0] = rnd->Uniform(0., 0.3);  // Division rate
+  parameters[1] = rnd->Uniform(0., 1.0);  // Apoptosis rate
+
+  return parameters;
+}
+
+// Define custom prior and get param probability
+inline real_t GetPriorProbability(stdvec& parameters) {
+  real_t probability = 1.0;
+  stdvec prob_vector(parameters.size(), 0.0);
+
+  // Prior probability
+  if (parameters[0] >= 0.0 && parameters[0] <= 0.3) {
+    prob_vector[0] = 1.0;
+  } else {
+    prob_vector[0] = 0.0;
+  }
+  if (parameters[1] >= 0.0 && parameters[1] <= 1.0) {
+    prob_vector[1] = 1.0;
+  } else {
+    prob_vector[1] = 0.0;
+  }
+
+  // Compute joint probability
+  for (auto prob : prob_vector) {
+    probability *= prob;
+  }
+
+  return probability;
+}
+
+inline real_t MCMCMoveStep(arma::mat covariance_mat,
+                           stdvecvec& proposed_parameters, real_t threhsold,
+                           stdvec& updated_distances, int particle, Random* rnd,
+                           int nb_params) {
   stdvec new_proposed_params(nb_params, 0.);
 
   arma::vec proposed_parameters_vec =
@@ -170,7 +198,11 @@ inline real_t MCMCMoveStep(arma::mat covariance_mat, stdvecvec& proposed_paramet
     distance_below_threshold = 1;
   }
 
-  real_t mcmc_acceptance = std::min(1.0, distance_below_threshold*prior_ratio);
+  real_t prior_ratio = GetPriorProbability(new_proposed_params) /
+                       GetPriorProbability(proposed_parameters[particle]);
+
+  real_t mcmc_acceptance =
+      std::min(1.0, distance_below_threshold * prior_ratio);
   if (rnd->Uniform(0., 1.) < mcmc_acceptance) {
     proposed_parameters[particle] = new_proposed_params;
     updated_distances[particle] = new_distance;
@@ -199,18 +231,12 @@ inline int Simulate(int argc, const char** argv) {
   real_t MCMC_iterations = 0;
   const real_t target_tolerance = 0.01;
 
-  stdvec division_rates =
-      GetParamsFromPrior(initial_number_of_particles, random);
-
-  stdvec apoptosis_rates =
-      GetParamsFromPrior(initial_number_of_particles, random);
-
   std::vector<std::vector<int>> simulation_results_x;
   stdvecvec parameters;
   stdvec distances;
 
   for (size_t i = 0; i < initial_number_of_particles; i++) {
-    parameters.push_back({division_rates[i], apoptosis_rates[i]});  // Each column is a particle with n_params parameters
+    parameters.push_back(DrawParamsFromPrior(random, number_of_parameters));
     simulation_results_x.push_back(SetupRunSimulation(parameters.back()));
     distances.push_back(GetDistance(simulation_results_x.back()));
   }
@@ -226,16 +252,13 @@ inline int Simulate(int argc, const char** argv) {
       distances[initial_number_of_particles - 1];  // Current threshold
 
   std::cout << "initial pars \n";
-  for (auto val : parameters)
-  {
-    for (auto par : val)
-    {
+  for (auto val : parameters) {
+    for (auto par : val) {
       std::cout << par << "\t";
     }
     std::cout << "\n";
   }
-  
-  
+
   // Main algorithm loop
   while (threhsold_t > target_tolerance) {
     std::cout << "Last threshold " << threhsold_t << ", accepted threshold "
@@ -245,7 +268,10 @@ inline int Simulate(int argc, const char** argv) {
     stdvec accepted_distances = {distances.begin(),
                                  distances.end() - discarded_particles};
     arma::mat accepted_parameters_mat = std_vec_vec_to_mat(accepted_parameters);
-    inplace_trans(accepted_parameters_mat); // We must traponse the matrix since the cov function needs measurements in the rows and vars in the columns
+    inplace_trans(
+        accepted_parameters_mat);  // We must traponse the matrix since the cov
+                                   // function needs measurements in the rows
+                                   // and vars in the columns
     arma::mat cov_matrix = cov(accepted_parameters_mat);
 
     stdvec updated_distances(discarded_particles,
