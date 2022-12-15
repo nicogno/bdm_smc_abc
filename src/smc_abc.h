@@ -70,7 +70,7 @@ inline stdvec vec_to_std_vec(arma::vec& V) {
   return SV;
 }
 
-inline std::vector<int> SetupRunSimulation(stdvec parameters) {
+inline std::vector<real_t> SetupRunSimulation(stdvec parameters) {
   auto set_param = [&](Param* param) {
     // BDM default pars
     param->export_visualization = false;
@@ -80,11 +80,27 @@ inline std::vector<int> SetupRunSimulation(stdvec parameters) {
     // Custom pars
     auto* sparam = param->Get<SimParam>();
     sparam->division_rate = parameters[0];
+    sparam->apoptosis_rate = parameters[1];
   };
 
   Simulation sim("test", set_param);
 
-  std::vector<int> results_x;
+  // Substances
+  // const real_t sub_time_res = (double)sparam->steps_per_day;
+  // const int subs_resolution = sparam->sub_res;
+  // struct FlatConc {
+  //   double initial_conc_;
+  //   FlatConc(double initial_conc) { initial_conc_ = initial_conc; }
+  //   double operator()(double x, double y, double z) { return 0.0; }
+  // };
+  // ModelInitializer::DefineSubstance(
+  //         kTGFb, "TGFb",
+  //         sparam->TGFb_ac_D / sub_time_res, sparam->TGFb_ac_d / sub_time_res,
+  //         subs_resolution);
+  // ModelInitializer::InitializeSubstance(sparam->TGFb_ac_flat_conc,
+  //                                       FlatConc());
+
+  std::vector<real_t> results_x;
 
   // Create initial model
   auto* rm = sim.GetResourceManager();
@@ -94,20 +110,30 @@ inline std::vector<int> SetupRunSimulation(stdvec parameters) {
   Cell* cell = new Cell(sparam->diam);
   cell->AddBehavior(new Divide());
   cell->AddBehavior(new Apoptosis());
+  // cell->AddBehavior(new Secretion());
   rm->AddAgent(cell);
 
   auto* count_cells = NewOperation("count_cells");
   count_cells->frequency_ = sparam->count_cell_freq;
   sim.GetScheduler()->ScheduleOp(count_cells);
+  // auto* get_conc = NewOperation("measure_conc");
+  // get_conc->frequency_ = sparam->count_cell_freq;
+  // sim.GetScheduler()->ScheduleOp(get_conc);
   sim.GetScheduler()->Simulate(sparam->simulation_time);
   results_x = count_cells->GetImplementation<CountCells>()->GetMeasurements();
 
   return results_x;
 }
 
-inline real_t GetDistance(std::vector<int> simulation_results_x) {
+inline real_t GetDistance(std::vector<real_t> simulation_results_x) {
   std::array<int, 10> experimental_data_y = {1,  5,  10, 15, 20,
                                              25, 30, 35, 40, 45};
+  // std::array<real_t, 10> experimental_data_y = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1};
+  // for (size_t i = 0; i < experimental_data_y.size(); i++)
+  // {
+  //   experimental_data_y[i]=experimental_data_y[i]*2.51*pow(10,-12);
+  // }
+  
   real_t distance = 0.0;
   size_t int_counter = 0;
 
@@ -191,7 +217,7 @@ inline real_t MCMCMoveStep(arma::vec new_proposed_params_vec,
 
   stdvec new_proposed_params = vec_to_std_vec(new_proposed_params_vec);
 
-  std::vector<int> simulation_results_x =
+  std::vector<real_t> simulation_results_x =
       SetupRunSimulation(new_proposed_params);
 
   real_t new_distance = GetDistance(simulation_results_x);
@@ -225,7 +251,7 @@ inline int Simulate(int argc, const char** argv) {
   random->SetSeed(time_seed.count());
 
   // Set algorithm parameters
-  int initial_number_of_particles = 10;  // 1000
+  int initial_number_of_particles = 300;  // 1000
   const int number_of_parameters = 2;
   const real_t fraction_rejected_thresholds = 0.5;
   const real_t minimum_mcmc_acceptance_rate = 0.01;

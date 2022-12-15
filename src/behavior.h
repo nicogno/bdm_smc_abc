@@ -6,6 +6,11 @@
 
 namespace bdm {
 
+// List the extracellular substances
+enum Substances {
+  kTGFb
+};
+
 // Behavior that divides the agent at each time step
 struct Divide : Behavior {
   BDM_BEHAVIOR_HEADER(Divide, Behavior, 1);
@@ -32,6 +37,20 @@ struct Divide : Behavior {
     void Run(Agent* agent) override {
       auto* random = Simulation::GetActive()->GetRandom();
       real_t ran = random->Uniform(0, 1) * 1.0;
+      auto* param = Simulation::GetActive()->GetParam();
+      auto* sparam = param->Get<SimParam>();
+      if (ran < sparam->apoptosis_rate) {
+        agent->RemoveFromSimulation();
+      }
+    }
+  };
+
+  struct Secretion : Behavior {
+    BDM_BEHAVIOR_HEADER(Secretion, Behavior, 1);
+
+    Secretion() {}
+
+    void Run(Agent* agent) override {
       auto* param = Simulation::GetActive()->GetParam();
       auto* sparam = param->Get<SimParam>();
       if (ran < sparam->apoptosis_rate) {
